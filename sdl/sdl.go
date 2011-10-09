@@ -39,6 +39,7 @@ import "io/ioutil"
 import "os"
 import "fmt"
 import "reflect"
+import "runtime"
 
 type cast unsafe.Pointer
 
@@ -83,6 +84,9 @@ func ClearError() { C.SDL_ClearError() }
 // of the returned surface, as it will be done automatically by sdl.Quit.
 func SetVideoMode(w int, h int, bpp int, flags uint32) *Surface {
 	var screen = C.SDL_SetVideoMode(C.int(w), C.int(h), C.int(bpp), C.Uint32(flags))
+
+	runtime.SetFinalizer(screen, (*Surface).Free)
+
 	return (*Surface)(cast(screen))
 }
 
@@ -207,7 +211,11 @@ func GL_SetAttribute(attr int, value int) int {
 func (screen *Surface) Flip() int { return int(C.SDL_Flip((*C.SDL_Surface)(cast(screen)))) }
 
 // Frees (deletes) a Surface
-func (screen *Surface) Free() { C.SDL_FreeSurface((*C.SDL_Surface)(cast(screen))) }
+func (screen *Surface) Free() {
+	C.SDL_FreeSurface((*C.SDL_Surface)(cast(screen)))
+
+	runtime.SetFinalizer(screen, nil)
+}
 
 // Locks a surface for direct access.
 func (screen *Surface) Lock() int {
@@ -336,9 +344,12 @@ func GetRGBA(color uint32, format *PixelFormat, r, g, b, a *uint8) {
 // Loads Surface from file (using IMG_Load).
 func Load(file string) *Surface {
 	cfile := C.CString(file)
-	var screen = C.IMG_Load(cfile)
+	s := (*Surface)(cast(C.IMG_Load(cfile)))
 	C.free(unsafe.Pointer(cfile))
-	return (*Surface)(cast(screen))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 func (src *Surface) SaveBMP(file string) int {
@@ -355,7 +366,11 @@ func Load_RW(rw *RWops, ac bool) *Surface {
 		acArg = 1
 	}
 
-	return (*Surface)(unsafe.Pointer(C.IMG_Load_RW((*C.SDL_RWops)(rw), acArg)))
+	s := (*Surface)(unsafe.Pointer(C.IMG_Load_RW((*C.SDL_RWops)(rw), acArg)))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 // Loads Surface of type t from RWops (using IMG_LoadTyped_RW).
@@ -368,7 +383,11 @@ func LoadTyped_RW(rw *RWops, ac bool, t string) *Surface {
 		acArg = 1
 	}
 
-	return (*Surface)(unsafe.Pointer(C.IMG_LoadTyped_RW((*C.SDL_RWops)(rw), acArg, ct)))
+	s := (*Surface)(unsafe.Pointer(C.IMG_LoadTyped_RW((*C.SDL_RWops)(rw), acArg, ct)))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 // Create new sdl.Surface from image.Image
@@ -393,14 +412,20 @@ func CreateSurfaceFromImage(img image.Image) *Surface {
 	defer s.Unlock()
 	C.memcpy(unsafe.Pointer(s.Pixels), unsafe.Pointer(&pix[0]), C.size_t(len(pix)))
 
+	runtime.SetFinalizer(s, (*Surface).Free)
+
 	return s
 }
 
 // Creates an empty Surface.
 func CreateRGBSurface(flags uint32, width int, height int, bpp int, Rmask uint32, Gmask uint32, Bmask uint32, Amask uint32) *Surface {
-	p := C.SDL_CreateRGBSurface(C.Uint32(flags), C.int(width), C.int(height), C.int(bpp),
-		C.Uint32(Rmask), C.Uint32(Gmask), C.Uint32(Bmask), C.Uint32(Amask))
-	return (*Surface)(cast(p))
+	s := (*Surface)(cast(C.SDL_CreateRGBSurface(C.Uint32(flags), C.int(width), C.int(height), C.int(bpp),
+		C.Uint32(Rmask), C.Uint32(Gmask), C.Uint32(Bmask), C.Uint32(Amask),
+	)))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 // Creates a Surface from existing pixel data. It expects pix to be a slice, array, or pointer.
@@ -415,19 +440,27 @@ func CreateRGBSurfaceFrom(pix interface{}, w, h, d, p int, rm, gm, bm, am uint32
 
 	s := C.SDL_CreateRGBSurfaceFrom(ptr, C.int(w), C.int(h), C.int(d), C.int(p), C.Uint32(rm), C.Uint32(gm), C.Uint32(bm), C.Uint32(am))
 
+	runtime.SetFinalizer(s, (*Surface).Free)
+
 	return (*Surface)(cast(s))
 }
 
 // Converts a surface to the display format
 func DisplayFormat(src *Surface) *Surface {
-	p := C.SDL_DisplayFormat((*C.SDL_Surface)(cast(src)))
-	return (*Surface)(cast(p))
+	s := (*Surface)(cast(C.SDL_DisplayFormat((*C.SDL_Surface)(cast(src)))))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 // Converts a surface to the display format with alpha
 func DisplayFormatAlpha(src *Surface) *Surface {
-	p := C.SDL_DisplayFormatAlpha((*C.SDL_Surface)(cast(src)))
-	return (*Surface)(cast(p))
+	s := (*Surface)(cast(C.SDL_DisplayFormatAlpha((*C.SDL_Surface)(cast(src)))))
+
+	runtime.SetFinalizer(s, (*Surface).Free)
+
+	return s
 }
 
 // Events
@@ -503,7 +536,11 @@ func JoystickName(n int) string {
 }
 
 func JoystickOpen(n int) *Joystick {
-	return (*Joystick)(unsafe.Pointer(C.SDL_JoystickOpen(C.int(n))))
+	joy := (*Joystick)(unsafe.Pointer(C.SDL_JoystickOpen(C.int(n))))
+
+	runtime.SetFinalizer(joy, (*Joystick).Close)
+
+	return joy
 }
 
 func JoystickOpened(n int) bool {
@@ -650,7 +687,11 @@ func ShowCursor(toggle int) int {
 type RWops C.SDL_RWops
 
 func AllocRW() *RWops {
-	return (*RWops)(C.SDL_AllocRW())
+	rw := (*RWops)(C.SDL_AllocRW())
+
+	runtime.SetFinalizer(rw, (*RWops).Free)
+
+	return rw
 }
 
 func (rw *RWops) Free() {
@@ -658,11 +699,19 @@ func (rw *RWops) Free() {
 }
 
 func RWFromMem(m []byte) *RWops {
-	return (*RWops)(C.SDL_RWFromMem(unsafe.Pointer(&m[0]), C.int(len(m))))
+	rw := (*RWops)(C.SDL_RWFromMem(unsafe.Pointer(&m[0]), C.int(len(m))))
+
+	runtime.SetFinalizer(rw, (*RWops).Free)
+
+	return rw
 }
 
 func RWFromConstMem(m []byte) *RWops {
-	return (*RWops)(C.SDL_RWFromConstMem(unsafe.Pointer(&m[0]), C.int(len(m))))
+	rw := (*RWops)(C.SDL_RWFromConstMem(unsafe.Pointer(&m[0]), C.int(len(m))))
+
+	runtime.SetFinalizer(rw, (*RWops).Free)
+
+	return rw
 }
 
 func RWFromReader(r io.Reader) *RWops {
@@ -675,7 +724,7 @@ func RWFromReader(r io.Reader) *RWops {
 	return RWFromConstMem(data)
 }
 
-func modeFromFlags(flag int) *C.char {
+func modeFromFlags(flag int) (c *C.char) {
 	switch flag {
 	case os.O_RDONLY:
 		return C.CString("r")
@@ -708,7 +757,11 @@ func RWFromFile(file string, mode int) *RWops {
 	}
 	defer C.free(unsafe.Pointer(cmode))
 
-	return (*RWops)(C.SDL_RWFromFile(cfile, cmode))
+	rw := (*RWops)(C.SDL_RWFromFile(cfile, cmode))
+
+	runtime.SetFinalizer(rw, (*RWops).Free)
+
+	return rw
 }
 
 // Causes 'SIGNONE: no trap'. Not sure why...
@@ -722,7 +775,11 @@ func RWFromFP(fp *os.File, ac bool) *RWops {
 	defer C.free(unsafe.Pointer(cmode))
 	cfp := C.fdopen(C.int(fp.Fd()), cmode)
 
-	return (*RWops)(C.SDL_RWFromFP(cfp, acArg))
+	rw := (*RWops)(C.SDL_RWFromFP(cfp, acArg))
+
+	runtime.SetFinalizer(rw, (*RWops).Free)
+
+	return rw
 }
 
 func (rw *RWops) Tell() int64 {

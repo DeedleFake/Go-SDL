@@ -38,7 +38,11 @@ func LoadMUS(file string) *Music {
 		return nil
 	}
 
-	return &Music{cmusic}
+	m := &Music{cmusic}
+
+	runtime.SetFinalizer(m, (*Music).Free)
+
+	return m
 }
 
 // Frees the loaded music file.
